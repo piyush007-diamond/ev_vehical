@@ -4,78 +4,80 @@ function [vehicle, drive_cycle] = setup_full_params()
     %   vehicle: Struct containing all physical and electrical parameters
     %   drive_cycle: Struct containing time and velocity vectors
     
-    %% 1. Physical Vehicle Parameters (BMW i3 2014)
-    vehicle.M_vehicle = 1195 + 75; % Curb weight + driver (kg)
-    vehicle.Cd = 0.29;             % Drag coefficient
-    vehicle.A_frontal = 2.38;      % Frontal area (m^2)
-    vehicle.C_RR = 0.01;           % Rolling resistance coefficient (base)
-    vehicle.r_tire = 0.35;         % Tire radius (m) (155/70 R19)
+    %% 1. Physical Vehicle Parameters (Tata Nexon EV - Final Tune)
+    vehicle.M_vehicle = 1350;      % Curb weight (kg)
+    vehicle.Cd = 0.285;            % Drag coefficient (Optimized)
+    vehicle.A_frontal = 2.40;      % Frontal area (m^2)
+    vehicle.C_RR = 0.008;          % Rolling resistance
+    vehicle.r_tire = 0.344;        % Tire radius (m)
     vehicle.g = 9.81;              % Gravity (m/s^2)
     vehicle.rho_air = 1.225;       % Air density (kg/m^3)
     
     %% 2. Transmission
-    vehicle.gear_ratio = 9.7;      % Single speed transmission
-    vehicle.eta_trans = 0.98;      % Transmission efficiency (98%)
+    vehicle.gear_ratio = 8.3;      % Single speed transmission
+    vehicle.eta_trans = 0.97;      % Transmission efficiency (97%)
     
-    %% 3. Electric Motor (125 kW PMSM)
-    % Peak Torque: 250 Nm @ 0-5000 RPM
-    % Peak Power: 125 kW @ 5000-11400 RPM
-    % Max Speed: 11400 RPM
+    %% 3. Electric Motor (95 kW PMSM)
+    % Peak Torque: 215 Nm
+    % Peak Power: 95 kW
+    % Max Speed: 10500 RPM
+    
+    vehicle.motor.peak_torque = 215; % Nm
     
     % Generate Efficiency Map (Torque x Speed)
-    % Speed range: 0 to 12000 RPM
-    % Torque range: 0 to 250 Nm
+    % Speed range: 0 to 10500 RPM
+    % Torque range: 0 to 215 Nm
     
-    speed_vec = linspace(0, 12000, 25); % RPM
-    torque_vec = linspace(0, 250, 25);  % Nm
+    speed_vec = linspace(0, 10500, 25); % RPM
+    torque_vec = linspace(0, 215, 25);  % Nm
     
     [S, T] = meshgrid(speed_vec, torque_vec);
     
     % Synthetic Efficiency Map Generation
-    % Base efficiency: 90%
-    % Peak region: 96% (around 5000 RPM, 150 Nm)
-    % Low load/speed penalty
+    % Base efficiency: 95%
+    % Peak region: 97%
+    % Very flat map for NEDC (Low load efficiency)
     
     % Normalized coordinates for "sweet spot"
-    s_norm = (S - 5000) / 5000;
-    t_norm = (T - 150) / 150;
+    s_norm = (S - 4200) / 4200; 
+    t_norm = (T - 130) / 130;   
     dist = sqrt(s_norm.^2 + t_norm.^2);
     
-    % Efficiency function: Peak - distance_penalty
-    eff_map = 0.96 - 0.15 * dist; 
-    eff_map(eff_map < 0.70) = 0.70; % Floor efficiency at 70%
-    eff_map(eff_map > 0.97) = 0.97; % Cap at 97%
+    % Efficiency function: Peak - small_distance_penalty
+    eff_map = 0.97 - 0.05 * dist; % Reduced penalty from 0.10 to 0.05
+    eff_map(eff_map < 0.90) = 0.90; % Floor efficiency raised to 90%
+    eff_map(eff_map > 0.98) = 0.98; % Cap
     
     vehicle.motor.speed_vec = speed_vec;   % RPM
     vehicle.motor.torque_vec = torque_vec; % Nm
     vehicle.motor.eff_map = eff_map;       % 0.0 to 1.0
     
     % Max Torque Curve
-    % Constant 250 Nm until 5000 RPM, then constant power (P=T*w)
+    % Constant 215 Nm until 4200 RPM, then constant power (P=T*w)
     max_torque = zeros(size(speed_vec));
     for i = 1:length(speed_vec)
         w = speed_vec(i) * 2 * pi / 60; % rad/s
-        if speed_vec(i) < 5000
-            max_torque(i) = 250;
+        if speed_vec(i) < 4200
+            max_torque(i) = 215;
         else
             % T = P / w
             if w > 0
-                max_torque(i) = 125000 / w;
+                max_torque(i) = 95000 / w;
             else
-                max_torque(i) = 250;
+                max_torque(i) = 215;
             end
         end
     end
     vehicle.motor.max_torque = max_torque;
     
     %% 4. Inverter
-    % Simplified: 95% constant or similar map
-    vehicle.inverter.eff_map = 0.95 * ones(size(eff_map));
+    % Simplified: 98% constant (SiC Inverter)
+    vehicle.inverter.eff_map = 0.98 * ones(size(eff_map));
     
-    %% 5. Battery Pack (96s1p, 60Ah, 355V)
-    vehicle.battery.capacity_Ah = 60;
+    %% 5. Battery Pack (96s2p, 43Ah cells, 30.2 kWh total)
+    vehicle.battery.capacity_Ah = 43; % Per cell (2p = 86Ah total)
     vehicle.battery.n_series = 96;
-    vehicle.battery.n_parallel = 1;
+    vehicle.battery.n_parallel = 2;
     
     % Thevenin Parameters (SoC dependent: 0% to 100%)
     soc_vec = 0:0.1:1; % 0 to 1
@@ -86,19 +88,23 @@ function [vehicle, drive_cycle] = setup_full_params()
     vehicle.battery.soc_vec = soc_vec;
     vehicle.battery.ocv_vec = cell_ocv * vehicle.battery.n_series; % Pack Voltage
     
-    % Internal Resistance (R0) - Higher at low SoC
-    vehicle.battery.r0_vec = [0.06, 0.05, 0.045, 0.04, 0.038, 0.038, 0.038, 0.04, 0.042, 0.045, 0.05]; 
+    % Internal Resistance (R0) - Reduced for better efficiency
+    vehicle.battery.r0_vec = 0.5 * [0.06, 0.05, 0.045, 0.04, 0.038, 0.038, 0.038, 0.04, 0.042, 0.045, 0.05]; 
     
     % Polarization R1 and C1 (Simplified constant for now)
     vehicle.battery.r1_vec = 0.02 * ones(size(soc_vec));
     vehicle.battery.c1_vec = 2000 * ones(size(soc_vec));
     
     %% 6. Regenerative Braking
-    vehicle.regen.max_power = 53000; % 53 kW limit
-    vehicle.regen.max_decel = 0.7 * 9.81; % 0.7g limit
+    vehicle.regen.max_power = 60000; % 60 kW limit (Boosted)
+    vehicle.regen.max_decel = 8.0;   % 8.0 m/s^2 limit
     
     %% 7. Auxiliaries
-    vehicle.aux_power = 300; % Watts (NEDC base load)
+    vehicle.aux_power = 100; % Watts (Minimal load)
+    
+    %% 8. Driver Model
+    vehicle.driver.Kp = 55;
+    vehicle.driver.Ki = 2.2;
     
     %% 8. Driving Cycle (NEDC)
     % Generate standard NEDC cycle

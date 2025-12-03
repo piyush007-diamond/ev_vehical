@@ -73,7 +73,7 @@ function build_driver_subsystem(model_name)
     
     % PI Controller (P=60, I=2)
     add_block('simulink/Continuous/PID Controller', [sub_name '/PID'], 'Position', [180, 60, 220, 90]);
-    set_param([sub_name '/PID'], 'P', '60', 'I', '2', 'D', '0');
+    set_param([sub_name '/PID'], 'P', 'vehicle.driver.Kp', 'I', 'vehicle.driver.Ki', 'D', '0');
     add_line(sub_name, 'Subtract/1', 'PID/1');
     
     % Saturation (Limit -1 to 1)
@@ -150,7 +150,7 @@ function build_regen_subsystem(model_name)
     % We'll use a Gain for this: Brake_Cmd * F_bmax
     % F_bmax approx 1270 * 9.81 * 0.8 = 9966 N
     add_block('simulink/Math Operations/Gain', [sub_name '/Calc_F_Demand'], 'Position', [100, 45, 150, 75]);
-    set_param([sub_name '/Calc_F_Demand'], 'Gain', '1270*9.81*0.8'); 
+    set_param([sub_name '/Calc_F_Demand'], 'Gain', 'vehicle.M_vehicle*vehicle.g*0.8'); 
     add_line(sub_name, 'Brake_Cmd/1', 'Calc_F_Demand/1');
     
     % Calculate Max Regen Force Available
@@ -169,10 +169,10 @@ function build_regen_subsystem(model_name)
     add_line(sub_name, 'P_regen_max/1', 'Div_P_by_V/1');
     add_line(sub_name, 'Min_Vel/1', 'Div_P_by_V/2');
     
-    % 2. Speed Fade (0% at 10kph, 100% at 20kph)
-    % 10 km/h = 2.77 m/s, 20 km/h = 5.55 m/s
+    % 2. Speed Fade (0% at 0.5 m/s, 100% at 2.0 m/s)
+    % 0.5 m/s = 1.8 km/h, 2.0 m/s = 7.2 km/h
     add_block('simulink/Lookup Tables/1-D Lookup Table', [sub_name '/Speed_Factor'], 'Position', [200, 180, 250, 210]);
-    set_param([sub_name '/Speed_Factor'], 'Table', '[0 0 1 1]', 'BreakpointsForDimension1', '[0 2.77 5.55 100]');
+    set_param([sub_name '/Speed_Factor'], 'Table', '[0 0 1 1]', 'BreakpointsForDimension1', '[0 0.5 2.0 100]');
     add_line(sub_name, 'Velocity/1', 'Speed_Factor/1');
     
     % 3. SoC Fade (100% at 90%, 0% at 98%)
@@ -592,7 +592,7 @@ function connect_all_subsystems(model_name)
     % In1: T_demand = (Accel_Cmd * 250) + T_regen_cmd
     % We need a Gain and Sum block
     add_block('simulink/Math Operations/Gain', [model_name '/Accel_Gain'], 'Position', [250, 60, 300, 90]);
-    set_param([model_name '/Accel_Gain'], 'Gain', '250'); % Max Torque Scaling
+    set_param([model_name '/Accel_Gain'], 'Gain', 'vehicle.motor.peak_torque'); % Max Torque Scaling
     add_line(model_name, 'Driver_Model/1', 'Accel_Gain/1');
     
     add_block('simulink/Math Operations/Add', [model_name '/Sum_Torque'], 'Position', [320, 60, 340, 90]);
